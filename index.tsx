@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
-import { GoogleGenAI, Type } from "@google/genai";
+import Papa from 'papaparse';
 import './index.css';
 
 import { Button } from "@/components/ui/button"
@@ -18,29 +18,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 
-// --- Constants: Provided Historical Data Summary ---
-const HISTORICAL_CONTEXT = `
-Latest Rounds from User Data:
-1203회 (2025-12-20): 10,13,22,25,32,45 + 보너스 16 [1등 총금액: 272억, 자동 10, 수동 4]
-1202회 (2025-12-13): 5,12,21,33,37,40 + 보너스 7 [1등 총금액: 268억, 자동 8, 수동 6]
-1201회 (2025-12-06): 7,9,24,27,35,36 + 보너스 37
-`;
-
-const PAST_WINNERS = [
-  { round: 1203, numbers: [10, 13, 22, 25, 32, 45], bonus: 16 },
-  { round: 1202, numbers: [5, 12, 21, 33, 37, 40], bonus: 7 },
-  { round: 1201, numbers: [7, 9, 24, 27, 35, 36], bonus: 37 },
-];
-
-const checkPastMatch = (nums: number[]): number | null => {
-    const sortedTarget = [...nums].sort((a, b) => a - b).join(',');
-    for (const past of PAST_WINNERS) {
-        const sortedPast = [...past.numbers].sort((a, b) => a - b).join(',');
-        if (sortedTarget === sortedPast) return past.round;
-    }
-    return null;
-};
-
 // --- Helper: Highlight Numbers ---
 const highlightNumbers = (text: string) => {
   if (!text || typeof text !== 'string') return text;
@@ -52,19 +29,18 @@ const highlightNumbers = (text: string) => {
 };
 
 // --- Interfaces ---
-interface LottoSet {
-  drwNo: number;
-  drwNoDate: string;
-  drwtNo1: number;
-  drwtNo2: number;
-  drwtNo3: number;
-  drwtNo4: number;
-  drwtNo5: number;
-  drwtNo6: number;
-  bnusNo: number;
-  firstWinamnt?: number;
-  firstAccumamnt?: number;
-  firstPrzwnerCo?: number;
+interface LottoHistory {
+  '회차': number;
+  '추첨일': string;
+  '1등_총당첨금': number;
+  '1등_당첨인원': number;
+  '번호1': number;
+  '번호2': number;
+  '번호3': number;
+  '번호4': number;
+  '번호5': number;
+  '번호6': number;
+  '보너스': number;
 }
 
 interface GeneratedSet {
@@ -112,30 +88,15 @@ const LottoBall: React.FC<{ number: number; size?: 'sm' | 'md' | 'lg' }> = ({ nu
 };
 
 // 1. HOME TAB
-const HomeTab = () => {
-  const [currentRound, setCurrentRound] = useState(1203);
-  const [data, setData] = useState<LottoSet | null>(null);
-  const [loading, setLoading] = useState(false);
+const HomeTab: React.FC<{ lottoHistory: LottoHistory[] }> = ({ lottoHistory }) => {
+  const [currentRoundIndex, setCurrentRoundIndex] = useState(0);
 
-  const fetchRoundData = async (round: number) => {
-    setLoading(true);
-    try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      // Using a simplified prompt for demonstration
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: `Lotto results for round ${round}. Context: ${HISTORICAL_CONTEXT}`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: { type: Type.OBJECT, properties: { drwNo: { type: Type.INTEGER }, drwNoDate: { type: Type.STRING }, drwtNo1: { type: Type.INTEGER }, drwtNo2: { type: Type.INTEGER }, drwtNo3: { type: Type.INTEGER }, drwtNo4: { type: Type.INTEGER }, drwtNo5: { type: Type.INTEGER }, drwtNo6: { type: Type.INTEGER }, bnusNo: { type: Type.INTEGER }, firstAccumamnt: { type: Type.NUMBER }, firstPrzwnerCo: { type: Type.INTEGER } } }
-        }
-      });
-      const text = response.text;
-      if (text) setData(JSON.parse(text));
-    } catch (e) { console.error(e); } finally { setLoading(false); }
-  };
+  if (lottoHistory.length === 0) {
+    return <div className="text-center p-10">데이터를 불러오는 중입니다...</div>;
+  }
 
-  useEffect(() => { fetchRoundData(currentRound); }, [currentRound]);
+  const latestData = lottoHistory[currentRoundIndex];
+  const totalRounds = lottoHistory.length;
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -162,7 +123,7 @@ const HomeTab = () => {
             <CardDescription>First Prize Pool</CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold text-blue-900">{(data?.firstAccumamnt ? (data.firstAccumamnt / 100000000).toFixed(0) : 0)}억</p>
+            <p className="text-3xl font-bold text-blue-900">{(latestData['1등_총당첨금'] / 100000000).toFixed(0)}억</p>
           </CardContent>
         </Card>
         <Card className="col-span-1 bg-purple-50 border-purple-200">
@@ -171,31 +132,27 @@ const HomeTab = () => {
             <CardDescription>Number of Winners</CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold text-purple-900">{data?.firstPrzwnerCo || 0}명</p>
+            <p className="text-3xl font-bold text-purple-900">{latestData['1등_당첨인원']}명</p>
           </CardContent>
         </Card>
       </div>
 
       <Card className="col-span-2">
         <CardHeader>
-          <CardTitle>{currentRound}회 당첨번호</CardTitle>
-          <CardDescription>{data?.drwNoDate || '...'}</CardDescription>
+          <CardTitle>{latestData['회차']}회 당첨번호</CardTitle>
+          <CardDescription>{latestData['추첨일']}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap justify-center items-center gap-3">
-            {data ? (
-                <>
-                    {[data.drwtNo1, data.drwtNo2, data.drwtNo3, data.drwtNo4, data.drwtNo5, data.drwtNo6].map((n, i) => (
-                        <LottoBall key={i} number={n} size="md" />
-                    ))}
-                    <span className="text-2xl font-bold text-muted-foreground mx-2">+</span>
-                    <LottoBall number={data.bnusNo} size="md" />
-                </>
-            ) : <p className="text-muted-foreground">로딩중...</p>}
+            {[...Array(6)].map((_, i) => (
+                <LottoBall key={i} number={latestData[`번호${i + 1}` as keyof LottoHistory] as number} size="md" />
+            ))}
+            <span className="text-2xl font-bold text-muted-foreground mx-2">+</span>
+            <LottoBall number={latestData['보너스']} size="md" />
         </CardContent>
         <CardFooter className="flex justify-between">
-          <Button variant="outline" onClick={() => setCurrentRound(r => r - 1)} disabled={currentRound <= 1193}>이전</Button>
-          <span className="text-sm font-medium text-muted-foreground">Round {currentRound}</span>
-          <Button variant="outline" onClick={() => setCurrentRound(r => r + 1)} disabled={currentRound >= 1203}>다음</Button>
+          <Button variant="outline" onClick={() => setCurrentRoundIndex(i => Math.min(i + 1, totalRounds - 1))} disabled={currentRoundIndex >= totalRounds - 1}>이전</Button>
+          <span className="text-sm font-medium text-muted-foreground">Round {latestData['회차']}</span>
+          <Button variant="outline" onClick={() => setCurrentRoundIndex(i => Math.max(i - 1, 0))} disabled={currentRoundIndex <= 0}>다음</Button>
         </CardFooter>
       </Card>
     </div>
@@ -203,30 +160,41 @@ const HomeTab = () => {
 };
 
 // 2. ANALYSIS TAB
-const AnalysisTab = () => {
+const AnalysisTab: React.FC<{ lottoHistory: LottoHistory[] }> = ({ lottoHistory }) => {
   const [analyzing, setAnalyzing] = useState(false);
   const [data, setData] = useState<AnalysisData | null>(null);
 
-  const handleAnalyze = async () => {
+  const handleAnalyze = () => {
+    if (lottoHistory.length === 0) return;
     setAnalyzing(true);
-    try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
-        contents: `...`, // Simplified prompt
-        config: { /* ... schema ... */ }
-      });
-      // Mock data for UI demonstration
-      setData({
-          hotNumbers: [{number: 34, count: 180}, {number: 1, count: 178}, {number: 12, count: 177}, {number: 27, count: 176}, {number: 43, count: 175}, {number: 17, count: 174}],
-          coldNumbers: [{number: 9, count: 130}, {number: 22, count: 132}, {number: 23, count: 135}, {number: 32, count: 138}, {number: 41, count: 139}, {number: 8, count: 140}],
-          insights: [
-              {title: "번호 합계 구간", bullets: ["최근 10주간 번호 합이 130-160 사이에서 자주 출현했습니다.", "다음 회차에서도 비슷한 구간을 노려보는 것이 좋습니다."], tag: "130 ~ 160"},
-              {title: "홀짝 비율", bullets: ["최근 홀수와 짝수의 비율은 3:3 또는 4:2가 가장 많았습니다.", "극단적인 비율은 피하는 것이 현명합니다."], tag: "3:3 or 4:2"},
-              {title: "연속 번호 패턴", bullets: ["연속 번호 출현 빈도가 감소하는 추세입니다.", "한 쌍 정도의 연속 번호는 고려해볼 만합니다."], tag: "1-2 쌍"},
-          ]
-      });
-    } catch (e) { console.error(e); } finally { setAnalyzing(false); }
+    
+    const numberCounts: { [key: number]: number } = {};
+    for (let i = 1; i <= 45; i++) {
+        numberCounts[i] = 0;
+    }
+
+    lottoHistory.forEach(row => {
+        for (let i = 1; i <= 6; i++) {
+            const num = row[`번호${i}` as keyof LottoHistory] as number;
+            if (num) numberCounts[num]++;
+        }
+    });
+
+    const sortedNumbers = Object.entries(numberCounts).sort(([, countA], [, countB]) => countA - countB);
+    
+    const coldNumbers = sortedNumbers.slice(0, 6).map(([num, count]) => ({ number: Number(num), count }));
+    const hotNumbers = sortedNumbers.slice(-6).reverse().map(([num, count]) => ({ number: Number(num), count }));
+
+    const insights: Insight[] = [
+        {title: "번호 합계 구간", bullets: ["최근 10주간 번호 합이 130-160 사이에서 자주 출현했습니다.", "다음 회차에서도 비슷한 구간을 노려보는 것이 좋습니다."], tag: "130 ~ 160"},
+        {title: "홀짝 비율", bullets: ["최근 홀수와 짝수의 비율은 3:3 또는 4:2가 가장 많았습니다.", "극단적인 비율은 피하는 것이 현명합니다."], tag: "3:3 or 4:2"},
+        {title: "연속 번호 패턴", bullets: ["연속 번호 출현 빈도가 감소하는 추세입니다.", "한 쌍 정도의 연속 번호는 고려해볼 만합니다."], tag: "1-2 쌍"},
+    ];
+
+    setTimeout(() => {
+        setData({ hotNumbers, coldNumbers, insights });
+        setAnalyzing(false);
+    }, 1500);
   };
 
   return (
@@ -234,11 +202,11 @@ const AnalysisTab = () => {
       <h2 className="text-2xl font-bold">데이터 분석</h2>
       <Card>
         <CardHeader>
-          <CardTitle>AI 빅데이터 분석</CardTitle>
-          <CardDescription>AI가 역대 패턴을 심층 분석하여 다음 회차의 번호를 예측합니다.</CardDescription>
+          <CardTitle>전체 회차 데이터 분석</CardTitle>
+          <CardDescription>{`총 ${lottoHistory.length}회차의 데이터를 기반으로 번호 출현 빈도를 분석합니다.`}</CardDescription>
         </CardHeader>
         <CardContent>
-          <Button onClick={handleAnalyze} disabled={analyzing} className="w-full">
+          <Button onClick={handleAnalyze} disabled={analyzing || lottoHistory.length === 0} className="w-full">
             {analyzing ? <><i className="fas fa-sync fa-spin mr-2"></i> 분석중...</> : '분석 실행하기'}
           </Button>
         </CardContent>
@@ -261,7 +229,7 @@ const AnalysisTab = () => {
               </Card>
           </div>
           <Card>
-            <CardHeader><CardTitle>AI 핵심 인사이트</CardTitle></CardHeader>
+            <CardHeader><CardTitle>AI 핵심 인사이트 (예시)</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               {data.insights.map((insight, idx) => (
                 <div key={idx} className="p-4 bg-muted rounded-lg">
@@ -282,18 +250,26 @@ const AnalysisTab = () => {
   );
 };
 
-
 // 3. GENERATE TAB
-const GenerateTab: React.FC<{ onSave: (set: GeneratedSet) => void }> = ({ onSave }) => {
+const GenerateTab: React.FC<{ onSave: (set: GeneratedSet) => void, lottoHistory: LottoHistory[] }> = ({ onSave, lottoHistory }) => {
   const [generated, setGenerated] = useState<GeneratedSet[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [minSum, setMinSum] = useState<number>(100);
   const [maxSum, setMaxSum] = useState<number>(170);
 
+  const checkPastMatch = (nums: number[]): number | null => {
+      const sortedTarget = [...nums].sort((a, b) => a - b).join(',');
+      for (const past of lottoHistory) {
+          const pastNumbers = [past['번호1'], past['번호2'], past['번호3'], past['번호4'], past['번호5'], past['번호6']];
+          const sortedPast = [...pastNumbers].sort((a, b) => a - b).join(',');
+          if (sortedTarget === sortedPast) return past['회차'];
+      }
+      return null;
+  };
+
   const handleGenerate = async (mode: 'random' | 'ai' | 'sum') => {
     setIsGenerating(true);
     setGenerated([]);
-    // Mock generation for UI
     await new Promise(r => setTimeout(r, 1000));
     let newSets: GeneratedSet[] = [];
      Array.from({length: 3}, (_, i) => {
@@ -358,7 +334,6 @@ const GenerateTab: React.FC<{ onSave: (set: GeneratedSet) => void }> = ({ onSave
   );
 };
 
-
 // 4. BOOKMARKS TAB
 const BookmarksTab: React.FC<{ bookmarks: GeneratedSet[], onRemove: (id: string) => void }> = ({ bookmarks, onRemove }) => (
     <div className="space-y-6 animate-fadeIn">
@@ -388,17 +363,52 @@ const BookmarksTab: React.FC<{ bookmarks: GeneratedSet[], onRemove: (id: string)
     </div>
 );
 
-
 // --- APP ---
 const App = () => {
   const [bookmarks, setBookmarks] = useState<GeneratedSet[]>([]);
+  const [lottoHistory, setLottoHistory] = useState<LottoHistory[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-      const saved = localStorage.getItem('lotto_bookmarks');
-      if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) setBookmarks(parsed);
-      }
+    const savedBookmarks = localStorage.getItem('lotto_bookmarks');
+    if (savedBookmarks) {
+        const parsed = JSON.parse(savedBookmarks);
+        if (Array.isArray(parsed)) setBookmarks(parsed);
+    }
+
+    Papa.parse('/lotto_full_history.csv', {
+        download: true,
+        header: true,
+        dynamicTyping: true,
+        complete: (results) => {
+            const transformedData = results.data.map((row: any) => {
+                if (!row['회차']) return null;
+                const numbers = row['당첨번호'].split(',').map(Number);
+                return {
+                    '회차': row['회차'],
+                    '추첨일': row['추첨일'],
+                    '1등_총당첨금': row['1등_총당첨금액'],
+                    '1등_당첨인원': row['1등_당첨게임수'],
+                    '번호1': numbers[0],
+                    '번호2': numbers[1],
+                    '번호3': numbers[2],
+                    '번호4': numbers[3],
+                    '번호5': numbers[4],
+                    '번호6': numbers[5],
+                    '보너스': row['보너스번호'],
+                };
+            }).filter(Boolean); // null 값 제거
+
+            const sortedData = (transformedData as LottoHistory[]).sort((a, b) => b['회차'] - a['회차']);
+            setLottoHistory(sortedData);
+            setLoading(false);
+        },
+        error: (err) => {
+            console.error("CSV 파싱 에러:", err);
+            setLoading(false);
+        }
+    });
+
   }, []);
 
   const saveToBookmarks = (set: GeneratedSet) => {
@@ -413,18 +423,22 @@ const App = () => {
       setBookmarks(updated);
       localStorage.setItem('lotto_bookmarks', JSON.stringify(updated));
   };
+  
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center">로딩중...</div>
+  }
 
   return (
-    <div className="min-h-screen max-w-md mx-auto bg-background text-foreground flex flex-col p-4 pb-8"> {/* pb-20으로 변경 */}
+    <div className="min-h-screen max-w-md mx-auto bg-background text-foreground flex flex-col p-4 pb-8">
       <Tabs defaultValue="home" className="flex flex-col flex-grow relative">
         <div className="flex-grow overflow-y-auto">
-          <TabsContent value="home" className="flex-grow"><HomeTab /></TabsContent>
-          <TabsContent value="analysis" className="flex-grow"><AnalysisTab /></TabsContent>
-          <TabsContent value="generate" className="flex-grow"><GenerateTab onSave={saveToBookmarks} /></TabsContent>
+          <TabsContent value="home" className="flex-grow"><HomeTab lottoHistory={lottoHistory} /></TabsContent>
+          <TabsContent value="analysis" className="flex-grow"><AnalysisTab lottoHistory={lottoHistory} /></TabsContent>
+          <TabsContent value="generate" className="flex-grow"><GenerateTab onSave={saveToBookmarks} lottoHistory={lottoHistory} /></TabsContent>
           <TabsContent value="bookmarks" className="flex-grow"><BookmarksTab bookmarks={bookmarks} onRemove={removeFromBookmarks} /></TabsContent>
         </div>
         
-        <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 z-10 w-full max-w-md"> {/* bottom-0으로 변경, px-4 제거 */}
+        <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 z-10 w-full max-w-md">
           <TabsList className="grid w-full grid-cols-4 h-14 rounded-full bg-muted p-1 shadow-lg">
             <TabsTrigger value="home"><i className="fa-solid fa-trophy text-xl"></i></TabsTrigger>
             <TabsTrigger value="analysis"><i className="fa-solid fa-database text-xl"></i></TabsTrigger>
